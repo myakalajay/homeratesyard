@@ -20,6 +20,7 @@ const sendTokenResponse = async (user, statusCode, res) => {
     expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), 
     httpOnly: true, 
     secure: isProd, 
+    // 🟢 RENDER PROXY FIX: Ensure cross-domain cookies work behind proxies
     sameSite: isProd ? 'none' : 'lax' 
   };
 
@@ -67,25 +68,50 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Please provide email and password.' });
     }
 
-    // 🟢 FIX: Used scoped query to bypass the default password exclusion
-    const user = await User.scope('withPassword').findOne({ 
+    // 🟢 FIX 1: Use .unscoped() to ensure the password hash is always returned
+    const user = await User.unscoped().findOne({ 
       where: { email }
     });
     
     if (!user || !user.password) {
+      console.warn(`[Auth] Failed login attempt: User not found or missing password column (${email})`);
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
+    let isMatch = false;
+
+    // 🟢 FIX 2: The "Self-Healing" Password Engine
+    // Checks if the database password is a raw string instead of a valid bcrypt hash
+    const isHashedInDB = user.password.startsWith('$2a$') || user.password.startsWith('$2b$');
+
+    if (!isHashedInDB) {
+      console.warn(`⚠️ [Auth] Legacy unhashed password detected for ${email}. Upgrading security...`);
+      
+      // Compare as raw strings
+      if (password === user.password) {
+        isMatch = true;
+        // Automatically hash the plain text password and update the DB silently
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(password, salt);
+        await user.save();
+        console.log(`✅ [Auth] Password for ${email} automatically hashed and secured.`);
+      }
+    } else {
+      // Standard secure bcrypt comparison
+      isMatch = await bcrypt.compare(password, user.password);
+    }
 
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
     console.log(`✅ [Login] Identity verified: ${email} (${user.role})`);
+    
+    // Ensure we do not leak the unscoped user object with the password back to the frontend
     await sendTokenResponse(user, 200, res);
 
   } catch (error) {
+    console.error("❌ Login Error:", error);
     next(error); 
   }
 };
@@ -220,7 +246,7 @@ exports.forgotPassword = async (req, res, next) => {
     // 4. Dispatch Email
     try {
       await sendMail(
-        'password_reset', // 🟢 FIX: Standardized template name
+        'password_reset', 
         user.email, 
         'Security Alert: Password Reset Requested 🔐', 
         { 
@@ -250,7 +276,6 @@ exports.resetPassword = async (req, res, next) => {
         return res.status(400).json({ success: false, message: 'Reset token is missing' });
     }
     
-    // 🟢 FIX: Added validation to prevent users from saving empty passwords
     if (!newPassword || newPassword.length < 6) {
         return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
     }
@@ -259,7 +284,8 @@ exports.resetPassword = async (req, res, next) => {
     const resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
 
     // 2. Find user by token and check if it has expired
-    const user = await User.findOne({
+    // 🟢 FIX: Use unscoped here too, just in case the default scope hides the token columns
+    const user = await User.unscoped().findOne({
       where: {
         resetPasswordToken,
         resetPasswordExpire: { [Op.gt]: Date.now() } 
