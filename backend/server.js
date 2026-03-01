@@ -2,6 +2,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const fs = require('fs');
+const bcrypt = require('bcryptjs'); // 🟢 FIX: Imported bcrypt for the Self-Healing Seeder
 
 // Initialize the Express app configuration
 const app = require('./src/app');
@@ -60,7 +61,6 @@ const startServer = async () => {
     console.log('✅ [Database] Connection verified.');
     
     // 🟢 FIX: Smart Database Sync Logic
-    // Allows us to safely alter production databases by setting DB_ALTER=true in Render
     const shouldAlterDB = NODE_ENV === 'development' || process.env.DB_ALTER === 'true';
 
     if (shouldAlterDB) {
@@ -72,47 +72,31 @@ const startServer = async () => {
     }
 
     // ==========================================
-    // ⚙️ AUTO-CREATE CORE ACCOUNTS (Frozen State Logic)
+    // ⚙️ SMART AUTO-SEEDER (Heals Legacy Passwords)
     // ==========================================
     try {
         const coreUsers = [
-            { 
-              name: 'Super Admin', 
-              email: 'superadmin@homeratesyard.com', 
-              password: process.env.SUPERADMIN_PASSWORD || 'superadmin123', 
-              role: 'superadmin', 
-              isVerified: true 
-            },
-            { 
-              name: 'System Admin', 
-              email: 'admin@homeratesyard.com', 
-              password: process.env.ADMIN_PASSWORD || 'admin123', 
-              role: 'admin', 
-              isVerified: true 
-            },
-            { 
-              name: 'Primary Lender', 
-              email: 'lender@homeratesyard.com', 
-              password: process.env.LENDER_PASSWORD || 'lender123', 
-              role: 'lender', 
-              isVerified: true 
-            },
-            { 
-              name: 'Demo Borrower', 
-              email: 'borrower@homeratesyard.com', 
-              password: process.env.BORROWER_PASSWORD || 'borrower123', 
-              role: 'borrower', 
-              isVerified: true 
-            }
+            { name: 'Super Admin', email: 'superadmin@homeratesyard.com', rawPassword: process.env.SUPERADMIN_PASSWORD || 'superadmin123', role: 'superadmin', isVerified: true },
+            { name: 'System Admin', email: 'admin@homeratesyard.com', rawPassword: process.env.ADMIN_PASSWORD || 'admin123', role: 'admin', isVerified: true },
+            { name: 'Primary Lender', email: 'lender@homeratesyard.com', rawPassword: process.env.LENDER_PASSWORD || 'lender123', role: 'lender', isVerified: true },
+            { name: 'Demo Borrower', email: 'borrower@homeratesyard.com', rawPassword: process.env.BORROWER_PASSWORD || 'borrower123', role: 'borrower', isVerified: true }
         ];
 
         for (const userData of coreUsers) {
-            const existingUser = await db.User.findOne({ where: { email: userData.email } });
+            // 🟢 FIX: Use unscoped() to bypass the security scope so we can read the existing password hash
+            const existingUser = await db.User.unscoped().findOne({ where: { email: userData.email } });
             
             if (!existingUser) {
                 const t = await db.sequelize.transaction();
                 try {
-                    const newUser = await db.User.create(userData, { transaction: t });
+                    const newUser = await db.User.create({
+                      name: userData.name,
+                      email: userData.email,
+                      password: userData.rawPassword, // The User model hook will automatically hash this
+                      role: userData.role,
+                      isVerified: userData.isVerified
+                    }, { transaction: t });
+                    
                     if (db.Profile) await db.Profile.create({ userId: newUser.id }, { transaction: t });
                     if (db.Wallet) await db.Wallet.create({ userId: newUser.id, balance: 0.00, currency: 'USD' }, { transaction: t });
                     
@@ -121,6 +105,18 @@ const startServer = async () => {
                 } catch (seedCreateErr) {
                     await t.rollback();
                     console.error(`❌ [Seed] Failed to create ${userData.role}:`, seedCreateErr.message);
+                }
+            } else {
+                // 🟢 The "Healing" Mechanism
+                // Check if the password in the DB is a raw string instead of a valid bcrypt hash
+                const isHashed = existingUser.password && (existingUser.password.startsWith('$2a$') || existingUser.password.startsWith('$2b$'));
+                
+                if (!isHashed) {
+                    console.log(`⚠️ [Seed] Healing unhashed legacy password for: ${userData.email}`);
+                    const salt = await bcrypt.genSalt(10);
+                    existingUser.password = await bcrypt.hash(userData.rawPassword, salt);
+                    await existingUser.save();
+                    console.log(`✅ [Seed] Password secured for: ${userData.email}`);
                 }
             }
         }
