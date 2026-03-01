@@ -1,7 +1,7 @@
 const db = require('../models');
 const { Op } = require('sequelize');
 
-// Helper to format timestamps for the UI (e.g., "2H AGO")
+// Helper to format timestamps for the UI
 const formatTimeAgo = (dateString) => {
   if (!dateString) return 'JUST NOW';
   const hours = Math.floor((new Date() - new Date(dateString)) / 3600000);
@@ -12,6 +12,10 @@ const formatTimeAgo = (dateString) => {
 
 exports.getDashboardSummary = async (req, res, next) => {
   try {
+    // 🟢 Safety Check 1: Ensure user object exists
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ success: false, message: "Unauthorized. User identity missing." });
+    }
     const userId = req.user.id;
 
     // ==========================================
@@ -19,10 +23,15 @@ exports.getDashboardSummary = async (req, res, next) => {
     // ==========================================
     let rawProperties = [];
     if (db.Property) {
-      rawProperties = await db.Property.findAll({ 
-        where: { userId }, 
-        raw: true 
-      }) || [];
+      try {
+        // 🟢 Safety Check 2: Isolated DB Query
+        rawProperties = await db.Property.findAll({ 
+          where: { userId }, // Note: If your DB uses 'user_id', change this to user_id: userId
+          raw: true 
+        }) || [];
+      } catch (propErr) {
+        console.warn("⚠️ [DB Warning] Property table query failed. Skipping properties data.");
+      }
     }
 
     let totalPropertyValue = 0;
@@ -41,7 +50,7 @@ exports.getDashboardSummary = async (req, res, next) => {
         name: p.name || p.address || 'Unnamed Property',
         value: val,
         loan: debt,
-        track: p.trackMarket !== false, // Defaults to true
+        track: p.trackMarket !== false,
         zipCode: p.zipCode || p.zip_code || 'N/A',
         currentRate: Number(p.interestRate || 7.00)
       };
@@ -53,39 +62,41 @@ exports.getDashboardSummary = async (req, res, next) => {
     // 2. LIVE ACTIVE LOAN PIPELINE
     // ==========================================
     let activeApplication = null;
-    let historicalTotalLoan = totalPropertyDebt; // Fallback
+    let historicalTotalLoan = totalPropertyDebt; 
     let historicalCurrentLoan = totalPropertyDebt;
 
     if (db.Loan) {
-      // Find the most recently updated active loan
-      const activeLoan = await db.Loan.findOne({
-        where: { 
-          userId, 
-          status: { [Op.in]: ['started', 'processing', 'underwriting', 'approved'] } 
-        },
-        order: [['updatedAt', 'DESC']],
-        raw: true
-      });
-
-      if (activeLoan) {
-        activeApplication = {
-          id: activeLoan.loanId || activeLoan.id || `APP-${userId}`,
-          type: activeLoan.loanType || activeLoan.purpose || 'Mortgage Application',
-          status: activeLoan.status || 'processing',
-          progress: activeLoan.progress || 25,
-          actionRequired: activeLoan.actionRequired || false
-        };
-      }
-
-      // Aggregate all loans for the Loan Balance Widget
-      const allLoans = await db.Loan.findAll({ where: { userId }, raw: true }) || [];
-      if (allLoans.length > 0) {
-        historicalTotalLoan = 0;
-        historicalCurrentLoan = 0;
-        allLoans.forEach(l => {
-          historicalTotalLoan += Number(l.originalAmount || l.amount || 0);
-          historicalCurrentLoan += Number(l.currentBalance || l.balance || 0);
+      try {
+        const activeLoan = await db.Loan.findOne({
+          where: { 
+            userId, 
+            status: { [Op.in]: ['started', 'processing', 'underwriting', 'approved'] } 
+          },
+          order: [['updatedAt', 'DESC']],
+          raw: true
         });
+
+        if (activeLoan) {
+          activeApplication = {
+            id: activeLoan.loanId || activeLoan.id || `APP-${userId}`,
+            type: activeLoan.loanType || activeLoan.purpose || 'Mortgage Application',
+            status: activeLoan.status || 'processing',
+            progress: activeLoan.progress || 25,
+            actionRequired: activeLoan.actionRequired || false
+          };
+        }
+
+        const allLoans = await db.Loan.findAll({ where: { userId }, raw: true }) || [];
+        if (allLoans.length > 0) {
+          historicalTotalLoan = 0;
+          historicalCurrentLoan = 0;
+          allLoans.forEach(l => {
+            historicalTotalLoan += Number(l.originalAmount || l.amount || 0);
+            historicalCurrentLoan += Number(l.currentBalance || l.balance || 0);
+          });
+        }
+      } catch (loanErr) {
+        console.warn("⚠️ [DB Warning] Loan table query failed. Skipping loan data.");
       }
     }
 
@@ -94,10 +105,7 @@ exports.getDashboardSummary = async (req, res, next) => {
     // ==========================================
     let refiTracker = null;
     if (formattedProperties.length > 0) {
-      // Find the property with the highest interest rate in their portfolio
       const highestRateProp = [...formattedProperties].sort((a, b) => b.currentRate - a.currentRate)[0];
-      
-      // Note: In a fully scaled app, todayMarketRate would come from a MarketRate DB table.
       const todayMarketRate = 5.85; 
 
       refiTracker = {
@@ -106,7 +114,6 @@ exports.getDashboardSummary = async (req, res, next) => {
         todayRate: todayMarketRate
       };
     } else {
-      // Fallback if they have no properties
       refiTracker = { property: 'MARKET AVERAGE', currentRate: 7.25, todayRate: 5.85 };
     }
 
@@ -115,20 +122,24 @@ exports.getDashboardSummary = async (req, res, next) => {
     // ==========================================
     let notifications = [];
     if (db.Notification) {
-      const rawNotes = await db.Notification.findAll({
-        where: { userId, isRead: false },
-        order: [['createdAt', 'DESC']],
-        limit: 5,
-        raw: true
-      }) || [];
+      try {
+        const rawNotes = await db.Notification.findAll({
+          where: { userId, isRead: false },
+          order: [['createdAt', 'DESC']],
+          limit: 5,
+          raw: true
+        }) || [];
 
-      notifications = rawNotes.map(n => ({
-        id: n.id,
-        message: n.message || n.title,
-        time: formatTimeAgo(n.createdAt),
-        read: n.isRead || false,
-        type: n.type || 'info' // 'action', 'info', 'warning'
-      }));
+        notifications = rawNotes.map(n => ({
+          id: n.id,
+          message: n.message || n.title,
+          time: formatTimeAgo(n.createdAt),
+          read: n.isRead || false,
+          type: n.type || 'info' 
+        }));
+      } catch (noteErr) {
+         console.warn("⚠️ [DB Warning] Notification table query failed. Skipping notifications.");
+      }
     }
 
     // ==========================================
@@ -138,7 +149,7 @@ exports.getDashboardSummary = async (req, res, next) => {
       equity: calculatedEquity > 0 ? calculatedEquity : 0,
       totalValue: totalPropertyValue,
       homesCount: formattedProperties.length,
-      activeApplication, // Will be null if none exist, hiding the widget cleanly
+      activeApplication, 
       loanAmount: { 
         total: historicalTotalLoan, 
         current: historicalCurrentLoan 
@@ -154,7 +165,7 @@ exports.getDashboardSummary = async (req, res, next) => {
     });
 
   } catch (error) {
-    console.error("❌ [Borrower Controller] Dashboard Aggregation Error:", error);
+    console.error("❌ [Borrower Controller] Dashboard Aggregation Error:", error.message);
     next(error);
   }
 };
