@@ -67,9 +67,9 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Please provide email and password.' });
     }
 
-    const user = await User.findOne({ 
-      where: { email },
-      attributes: { include: ['password'] } 
+    // 🟢 FIX: Used scoped query to bypass the default password exclusion
+    const user = await User.scope('withPassword').findOne({ 
+      where: { email }
     });
     
     if (!user || !user.password) {
@@ -124,13 +124,12 @@ exports.register = async (req, res, next) => {
       await Wallet.create({ userId: user.id, balance: 0.00, currency: 'USD' }, { transaction: t });
     }
 
-    // 🟢 FIX: Commit transaction before triggering emails or tokens
     await t.commit();
     console.log(`✅ [Register] New entity provisioned: ${email} (${user.role})`);
 
     // 3. Trigger Welcome Email (Non-blocking)
     try {
-      const loginUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/auth/login`;
+      const loginUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/auth/login`;
       await sendMail(
         'welcome', 
         user.email, 
@@ -147,9 +146,9 @@ exports.register = async (req, res, next) => {
     await sendTokenResponse(user, 201, res);
 
   } catch (error) {
-    // 🟢 FIX: Safe rollback check
-    if (t && !t.finished) {
-      await t.rollback();
+    // Safe transaction rollback
+    if (t) {
+      try { await t.rollback(); } catch (rollbackErr) { /* ignore */ }
     }
     console.error("❌ Register Error:", error);
     next(error);
@@ -215,13 +214,13 @@ exports.forgotPassword = async (req, res, next) => {
     await user.save();
 
     // 3. Create reset url
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
+    const frontendUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const resetUrl = `${frontendUrl}/auth/reset-password/${resetToken}`;
 
     // 4. Dispatch Email
     try {
       await sendMail(
-        'forgot_password', // 🟢 FIX: Aligned with the template ID in your Email Builder
+        'password_reset', // 🟢 FIX: Standardized template name
         user.email, 
         'Security Alert: Password Reset Requested 🔐', 
         { 
@@ -244,10 +243,16 @@ exports.forgotPassword = async (req, res, next) => {
 
 exports.resetPassword = async (req, res, next) => {
   try {
-    // 🟢 FIX: Matches frontend route mapping (req.params.token)
     const token = req.params.token; 
+    const newPassword = req.body.password;
+
     if (!token) {
         return res.status(400).json({ success: false, message: 'Reset token is missing' });
+    }
+    
+    // 🟢 FIX: Added validation to prevent users from saving empty passwords
+    if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
     }
 
     // 1. Get hashed token from URL params
@@ -257,7 +262,7 @@ exports.resetPassword = async (req, res, next) => {
     const user = await User.findOne({
       where: {
         resetPasswordToken,
-        resetPasswordExpire: { [Op.gt]: Date.now() } // 🟢 FIX: Properly utilizes the imported Op
+        resetPasswordExpire: { [Op.gt]: Date.now() } 
       }
     });
 
@@ -266,7 +271,7 @@ exports.resetPassword = async (req, res, next) => {
     }
 
     // 3. Set new password and clear tokens
-    user.password = req.body.password; 
+    user.password = newPassword; 
     user.resetPasswordToken = null;
     user.resetPasswordExpire = null;
     await user.save();
