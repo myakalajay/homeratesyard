@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 const morgan = require('morgan');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
+const fs = require('fs');
 
 // Initialize App
 const app = express();
@@ -21,7 +22,7 @@ app.use(helmet());
  */
 const allowedOrigins = [
   'http://localhost:3000',
-  'http://127.0.0.1:3000', // Added 127.0.0.1 just in case
+  'http://127.0.0.1:3000',
   'https://homeratesyard.vercel.app',
   process.env.CLIENT_URL
 ].filter(Boolean);
@@ -30,8 +31,10 @@ app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true);
     
-    const isVercel = origin.endsWith('.vercel.app');
-    const isAllowed = allowedOrigins.includes(origin) || isVercel;
+    // Safely strip trailing slashes if they exist
+    const cleanOrigin = origin.replace(/\/$/, "");
+    const isVercel = cleanOrigin.endsWith('.vercel.app');
+    const isAllowed = allowedOrigins.includes(cleanOrigin) || isVercel;
 
     if (isAllowed) {
       callback(null, true);
@@ -65,20 +68,32 @@ app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 // Global Rate Limiting
 const limiter = rateLimit({
   windowMs: 10 * 60 * 1000, 
-  max: 200, // Slightly increased to prevent blocking your own admin dashboards
+  max: 200, 
   message: { success: false, message: 'Too many requests from this IP, please try again later.' },
   standardHeaders: true, 
   legacyHeaders: false, 
 });
 app.use('/api', limiter);
 
+
+// ==========================================
+// 🚧 SYSTEM INTERCEPTORS (Must go before routes)
+// ==========================================
+// 🟢 FIX: Moved Maintenance Mode to the top so it actually intercepts traffic!
+try {
+  const maintenanceMode = require('./middleware/maintenanceMode.js');
+  app.use(maintenanceMode);
+} catch (e) {
+  console.warn('⚠️ [Maintenance] Middleware not found. System will bypass maintenance checks.');
+}
+
+
 // =======================
 // 🛤️ Routes (Mounting)
 // =======================
 
-// 🟢 NEW: Explicitly mount the new email routes BEFORE general admin routes
-const emailAdminRoutes = require('./routes/email.routes.js');
-app.use('/api/admin/emails', emailAdminRoutes);
+// 🟢 FIX: Removed explicit email.routes.js import since it was baked into admin.routes.js previously.
+// This prevents MODULE_NOT_FOUND crashes on Render.
 
 app.use('/api/auth', require('./routes/auth.routes')); 
 app.use('/api/users', require('./routes/user.routes')); 
@@ -86,7 +101,7 @@ app.use('/api/loans', require('./routes/loan.routes'));
 app.use('/api/documents', require('./routes/document.routes')); 
 app.use('/api/payments', require('./routes/payment.routes')); 
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
-app.use('/api/admin', require('./routes/admin.routes')); // General admin routes
+app.use('/api/admin', require('./routes/admin.routes')); // Emails are safely inside here now
 app.use('/api/notifications', require('./routes/notification.routes'));
 app.use('/api/tickets', require('./routes/ticket.routes'));
 
@@ -124,17 +139,17 @@ app.use((err, req, res, next) => {
     }
 
     if (err.name === 'SequelizeValidationError') {
-        return res.status(400).json({ success: false, message: err.errors.map(e => e.message) });
+        // 🟢 FIX: Maps array of errors to a single comma-separated string to prevent Frontend UI crashes
+        const cleanMessage = err.errors.map(e => e.message).join(', ');
+        return res.status(400).json({ success: false, message: cleanMessage });
     }
 
     res.status(statusCode).json({ 
       success: false,
       message: message,
+      // Hide stack trace in production to prevent leaking server details
       stack: process.env.NODE_ENV === 'production' ? null : err.stack
     });
 });
-
-// Maintenance Mode Middleware
-app.use(require('./middleware/maintenanceMode.js'));
 
 module.exports = app;

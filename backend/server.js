@@ -51,7 +51,6 @@ if (!fs.existsSync(templateDir)) {
   fs.writeFileSync(path.join(templateDir, 'password_reset.html'), '<h2>Password Reset</h2><p>Click <a href="{{action_url}}">here</a> to securely reset your password.</p>');
 }
 
-
 const startServer = async () => {
   try {
     console.log(`🚀 [Server] Initializing Platform in ${NODE_ENV.toUpperCase()} mode...`);
@@ -60,20 +59,22 @@ const startServer = async () => {
     await db.sequelize.authenticate();
     console.log('✅ [Database] Connection verified.');
     
-    // SECURE SYNC LOGIC
-    if (NODE_ENV === 'development') {
+    // 🟢 FIX: Smart Database Sync Logic
+    // Allows us to safely alter production databases by setting DB_ALTER=true in Render
+    const shouldAlterDB = NODE_ENV === 'development' || process.env.DB_ALTER === 'true';
+
+    if (shouldAlterDB) {
       await db.sequelize.sync({ alter: true });
-      console.log('✅ [Database] Development tables synced (alter:true).');
+      console.log(`✅ [Database] Schema synced with alter:true (Safety Overrides Active).`);
     } else {
       await db.sequelize.sync();
-      console.log('✅ [Database] Production schema verified.');
+      console.log('✅ [Database] Production schema verified (Strict Mode).');
     }
 
     // ==========================================
     // ⚙️ AUTO-CREATE CORE ACCOUNTS (Frozen State Logic)
     // ==========================================
     try {
-        // 🟢 FIX: Individual role passwords. Supports .env overrides for production security.
         const coreUsers = [
             { 
               name: 'Super Admin', 
@@ -106,11 +107,8 @@ const startServer = async () => {
         ];
 
         for (const userData of coreUsers) {
-            // Check if the user already exists in the database
             const existingUser = await db.User.findOne({ where: { email: userData.email } });
             
-            // 🟢 The "Freeze" Mechanism: If the user exists, this block is skipped entirely.
-            // This ensures we never overwrite their passwords once they've been generated.
             if (!existingUser) {
                 const t = await db.sequelize.transaction();
                 try {
