@@ -20,9 +20,9 @@ router.use(protect);
 // We added 'admin', 'Admin', and 'SuperAdmin' to ALL endpoints.
 // This completely eliminates 403 Forbidden errors for any admin testing the module.
 
-// Settings Routes
-router.get('/settings', authorize('admin', 'Admin', 'super_admin', 'superadmin', 'SuperAdmin'), getSettings);
-router.put('/settings', authorize('admin', 'Admin', 'super_admin', 'superadmin', 'SuperAdmin'), updateSettings);
+// ✅ GOOD: Allows both system admins and super admins
+router.get('/settings', protect, authorize('superadmin', 'admin', 'super_admin'), getEmailSettings);
+router.put('/settings', protect, authorize('superadmin', 'admin', 'super_admin'), updateEmailSettings);
 
 // Template Routes
 router.get('/templates', authorize('admin', 'Admin', 'super_admin', 'superadmin', 'SuperAdmin'), getTemplates);
