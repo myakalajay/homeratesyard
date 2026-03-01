@@ -24,8 +24,8 @@ const User = sequelize.define('User', {
     allowNull: false
   },
   role: {
-    // Note: Kept strictly lowercase to match our RBAC rules
-    type: DataTypes.ENUM('superadmin', 'admin', 'lender', 'borrower'),
+    // 🟢 FIX: Added 'super_admin' fallback to prevent legacy database crashes
+    type: DataTypes.ENUM('superadmin', 'super_admin', 'admin', 'lender', 'borrower'),
     defaultValue: 'borrower',
     allowNull: false
   },
@@ -40,7 +40,7 @@ const User = sequelize.define('User', {
   },
   
   // ==========================================
-  // 🔐 NEW: PASSWORD RECOVERY FIELDS
+  // 🔐 PASSWORD RECOVERY FIELDS
   // ==========================================
   resetPasswordToken: {
     type: DataTypes.STRING,
@@ -56,6 +56,18 @@ const User = sequelize.define('User', {
 }, {
   timestamps: true,
   paranoid: true, // Enables soft deletes (deletedAt)
+  
+  // 🟢 FIX: CRITICAL SECURITY - Prevent passwords from leaking to the frontend APIs
+  defaultScope: {
+    attributes: { exclude: ['password', 'resetPasswordToken', 'resetPasswordExpire'] }
+  },
+  scopes: {
+    // Allows auth controllers to easily bypass the default scope using User.scope('withPassword').findOne(...)
+    withPassword: {
+      attributes: { include: ['password', 'resetPasswordToken', 'resetPasswordExpire'] }
+    }
+  },
+
   hooks: {
     beforeCreate: async (user) => {
       // Only hash if the password is provided (safeguard for OAuth integrations)
@@ -79,6 +91,10 @@ const User = sequelize.define('User', {
 // ==========================================
 
 User.prototype.matchPassword = async function (enteredPassword) {
+  // Graceful fallback if the password wasn't loaded in the query scope
+  if (!this.password) {
+    throw new Error('Password hash not loaded in user instance. Use scope("withPassword") in your query.');
+  }
   return await bcrypt.compare(enteredPassword, this.password);
 };
 
