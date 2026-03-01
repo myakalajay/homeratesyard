@@ -1,0 +1,6 @@
+node_modules/
+.next/
+.env*ai-engine/chat_history.db
+ai-engine/chat_history.db
+backend/.env
+.env

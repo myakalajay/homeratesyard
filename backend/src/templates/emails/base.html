@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="x-apple-disable-message-reformatting">
+    <meta name="color-scheme" content="light dark">
+    <meta name="supported-color-schemes" content="light dark">
+    <title>HomeRatesYard</title>
+    
+    <style>
+        /* Base Reset */
+        body, table, td, a { -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%; }
+        table, td { mso-table-lspace: 0pt; mso-table-rspace: 0pt; }
+        img { -ms-interpolation-mode: bicubic; border: 0; height: auto; line-height: 100%; outline: none; text-decoration: none; }
+        body { margin: 0; padding: 0; width: 100% !important; background-color: #F4F7FA; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        
+        /* Layout Structure */
+        .wrapper { width: 100%; background-color: #F4F7FA; padding: 40px 20px; }
+        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 30px rgba(10, 17, 40, 0.08); border: 1px solid #E2E8F0; }
+        
+        /* Header - Dark Brand Theme */
+        .header { background-color: #0A1128; padding: 35px 40px; text-align: center; border-bottom: 4px solid #B91C1C; }
+        .header img { max-width: 220px; height: auto; display: block; margin: 0 auto; }
+        /* Fallback text styling if images are blocked */
+        .header-fallback { color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -0.5px; }
+        .header-fallback span { color: #B91C1C; }
+
+        /* Core Content */
+        .content { padding: 45px 40px; color: #334155; line-height: 1.6; font-size: 16px; background-color: #ffffff; }
+        .content h2 { color: #0A1128; font-size: 22px; margin-top: 0; margin-bottom: 16px; font-weight: 700; letter-spacing: -0.5px; }
+        .content p { margin: 0 0 20px 0; }
+        .content p:last-child { margin-bottom: 0; }
+        
+        /* Components */
+        .btn { display: inline-block; padding: 14px 32px; background-color: #B91C1C; color: #ffffff !important; text-decoration: none; border-radius: 8px; font-weight: bold; margin: 10px 0 20px 0; font-size: 15px; text-align: center; transition: background-color 0.3s; }
+        .btn:hover { background-color: #991B1B; }
+        .alert-box { background-color: #EFF6FF; border-left: 4px solid #3B82F6; border-radius: 4px; padding: 16px 20px; margin: 24px 0; font-size: 14px; color: #1E3A8A; }
+        .data-table { width: 100%; border-collapse: collapse; margin: 24px 0; }
+        .data-table td { padding: 16px; border: 1px solid #E2E8F0; }
+        .data-table td:first-child { background-color: #F8FAFC; font-weight: 600; width: 40%; color: #475569; }
+
+        /* Footer */
+        .footer { background-color: #F8FAFC; padding: 35px 40px; text-align: center; border-top: 1px solid #E2E8F0; }
+        .footer p { margin: 0 0 10px 0; font-size: 12px; color: #64748B; line-height: 1.6; }
+        .footer a { color: #B91C1C; text-decoration: none; font-weight: 600; }
+        .disclaimer { font-size: 10px !important; color: #94A3B8 !important; margin-top: 20px !important; }
+
+        /* Responsive Utilities */
+        @media screen and (max-width: 600px) {
+            .wrapper { padding: 20px 10px; }
+            .header { padding: 25px 20px; }
+            .content { padding: 30px 20px; }
+            .footer { padding: 25px 20px; }
+        }
+    </style>
+</head>
+<body style="background-color: #F4F7FA; margin: 0; padding: 0; -webkit-text-size-adjust: 100%; -ms-text-size-adjust: 100%;">
+
+    <div style="display: none; max-height: 0px; overflow: hidden; mso-hide: all;">
+        {{preheader}}
+    </div>
+
+    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #F4F7FA;">
+        <tr>
+            <td align="center" class="wrapper">
+                
+                <table class="container" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff;">
+                    
+                    <tr>
+                        <td class="header" align="center">
+                            <a href="#" target="_blank" style="text-decoration: none;">
+                                <img src="https://homeratesyard.com/images/logo-light.png" alt="HomeRatesYard" width="220" border="0" style="display: block; color: #ffffff; font-size: 24px; font-weight: bold; font-family: sans-serif;">
+                            </a>
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td class="content">
+                            {{content}}
+                        </td>
+                    </tr>
+
+                    <tr>
+                        <td class="footer" align="center">
+                            <p style="font-size: 14px; font-weight: bold; color: #0A1128;">&copy; {{current_year}} HomeRatesYard Enterprise</p>
+                            <p>123 Financial District, Suite 400<br>New York, NY 10004</p>
+                            
+                            <p style="margin-top: 20px;">
+                                Need assistance? <a href="mailto:support@homeratesyard.com">Contact our Support Team</a><br>
+                                or visit your <a href="https://homeratesyard.com/auth/login">Client Dashboard</a>.
+                            </p>
+
+                            <p class="disclaimer">
+                                EQUAL HOUSING LENDER. NMLS #1234567. <br>
+                                This email is an automated system notification. Please do not reply directly to this address. 
+                                Confidentiality Notice: This email and any attachments are confidential and may also be privileged. If you are not the intended recipient, please delete all copies and notify the sender immediately.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>

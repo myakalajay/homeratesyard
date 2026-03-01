@@ -1,0 +1,124 @@
+services:
+  # ==========================================
+  # 🗄️ INFRASTRUCTURE LAYER
+  # ==========================================
+  
+  db:
+    image: postgres:15-alpine
+    container_name: homerates_db
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-homerates_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: homerates_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ==========================================
+  # 🧠 APPLICATION LAYER
+  # ==========================================
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: homerates_api
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=db
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_NAME=${DB_NAME:-homerates_db}
+      - REDIS_URL=redis://redis:6379
+      - AI_ENGINE_URL=http://ai-engine:8000 # 🟢 NEW: Backend-to-AI internal link
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  # Python AI Engine (Sarah's Brain)
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    container_name: homerates_ai
+    restart: always
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ai-engine:/app
+      - ai_downloads:/app/downloads # 🟢 NEW: Persistent PDF storage
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@db:5432/${DB_NAME:-homerates_db}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: homerates_client
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:5000/api
+      - NEXT_PUBLIC_AI_URL=http://localhost:8000/api/v1/chat # 🟢 NEW: Direct Browser-to-Sarah link
+      - WATCHPACK_POLLING=true
+    command: >
+      sh -c "npm install cookies-next@4 --legacy-peer-deps && npm run dev"
+    depends_on:
+      - backend
+      - ai-engine
+    networks:
+      - app-network
+
+# ==========================================
+# 🌐 NETWORK & VOLUMES
+# ==========================================
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  ai_downloads: # 🟢 NEW: Keeps Sarah's PDFs safe across updates

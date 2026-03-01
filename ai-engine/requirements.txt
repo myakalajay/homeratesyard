@@ -1,0 +1,17 @@
+# --- CORE WEB FRAMEWORK ---
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.2
+pydantic-settings==2.1.0
+
+# --- DATABASE & MODELS ---
+sqlalchemy==2.0.23
+# Note: sqlite3 is built into Python; no pip install needed.
+
+# --- UTILITIES ---
+python-dotenv==1.0.0
+reportlab==4.0.8
+aiofiles==23.2.1  # Required for FastAPI StaticFiles / PDF serving
+
+# --- TYPE HINTING & LINTING ---
+typing-extensions==4.8.0
