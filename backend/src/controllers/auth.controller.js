@@ -20,8 +20,7 @@ const sendTokenResponse = async (user, statusCode, res) => {
     expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), 
     httpOnly: true, 
     secure: isProd, 
-    // 🟢 RENDER PROXY FIX: Ensure cross-domain cookies work behind proxies
-    sameSite: isProd ? 'none' : 'lax' 
+    sameSite: isProd ? 'none' : 'lax' // 🟢 RENDER FIX: Required for Cross-Origin cookies
   };
 
   let profileData = null;
@@ -35,7 +34,7 @@ const sendTokenResponse = async (user, statusCode, res) => {
         walletData = await Wallet.findOne({ where: { userId: user.id } });
     }
   } catch (e) {
-    console.warn('⚠️ [Auth Controller] Non-fatal: Could not fetch associations for token response.');
+    console.warn('⚠️ [Auth] Non-fatal: Could not fetch associations for token response.');
   }
 
   res.status(statusCode)
@@ -68,36 +67,27 @@ exports.login = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Please provide email and password.' });
     }
 
-    // 🟢 FIX 1: Use .unscoped() to ensure the password hash is always returned
-    const user = await User.unscoped().findOne({ 
-      where: { email }
-    });
+    const user = await User.unscoped().findOne({ where: { email } });
     
     if (!user || !user.password) {
-      console.warn(`[Auth] Failed login attempt: User not found or missing password column (${email})`);
       return res.status(401).json({ success: false, message: 'Invalid credentials.' });
     }
 
     let isMatch = false;
-
-    // 🟢 FIX 2: The "Self-Healing" Password Engine
-    // Checks if the database password is a raw string instead of a valid bcrypt hash
     const isHashedInDB = user.password.startsWith('$2a$') || user.password.startsWith('$2b$');
 
     if (!isHashedInDB) {
       console.warn(`⚠️ [Auth] Legacy unhashed password detected for ${email}. Upgrading security...`);
       
-      // Compare as raw strings
       if (password === user.password) {
         isMatch = true;
-        // Automatically hash the plain text password and update the DB silently
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(password, salt);
+        // 🟢 FIX: We set it to the raw password and let the User Model Hook hash it ONCE.
+        // Previously, we hashed it here AND the model hashed it, causing a corrupted double-hash.
+        user.password = password; 
         await user.save();
-        console.log(`✅ [Auth] Password for ${email} automatically hashed and secured.`);
+        console.log(`✅ [Auth] Password for ${email} secured automatically.`);
       }
     } else {
-      // Standard secure bcrypt comparison
       isMatch = await bcrypt.compare(password, user.password);
     }
 
@@ -106,8 +96,6 @@ exports.login = async (req, res, next) => {
     }
 
     console.log(`✅ [Login] Identity verified: ${email} (${user.role})`);
-    
-    // Ensure we do not leak the unscoped user object with the password back to the frontend
     await sendTokenResponse(user, 200, res);
 
   } catch (error) {
@@ -132,7 +120,6 @@ exports.register = async (req, res, next) => {
 
     t = await sequelize.transaction(); 
 
-    // 1. Create Core Entity
     const user = await User.create({
       name,
       email,
@@ -141,7 +128,6 @@ exports.register = async (req, res, next) => {
       isVerified: false
     }, { transaction: t });
 
-    // 2. Create Attached Sub-Entities
     if (Profile && typeof Profile.create === 'function') {
       await Profile.create({ userId: user.id, nmlsId: nmlsId || null, companyName: companyName || null }, { transaction: t });
     }
@@ -153,30 +139,24 @@ exports.register = async (req, res, next) => {
     await t.commit();
     console.log(`✅ [Register] New entity provisioned: ${email} (${user.role})`);
 
-    // 3. Trigger Welcome Email (Non-blocking)
     try {
       const loginUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/auth/login`;
       await sendMail(
         'welcome', 
         user.email, 
         'Welcome to HomeRatesYard! 🚀', 
-        { 
-          user_name: user.name.split(' ')[0], 
-          action_url: loginUrl 
-        }
+        { user_name: user.name.split(' ')[0], action_url: loginUrl }
       );
     } catch (mailError) {
-      console.error('⚠️ [Auth] User registered, but welcome email failed to send:', mailError.message);
+      console.warn('⚠️ [Auth] Welcome email failed:', mailError.message);
     }
 
     await sendTokenResponse(user, 201, res);
 
   } catch (error) {
-    // Safe transaction rollback
     if (t) {
       try { await t.rollback(); } catch (rollbackErr) { /* ignore */ }
     }
-    console.error("❌ Register Error:", error);
     next(error);
   }
 };
@@ -186,13 +166,10 @@ exports.getMe = async (req, res, next) => {
     if (!req.user || !req.user.id) {
       return res.status(401).json({ success: false, message: 'Unauthorized access.' });
     }
-
     const user = await User.findByPk(req.user.id);
-
     if (!user) {
       return res.status(404).json({ success: false, message: 'User entity not found.' });
     }
-
     await sendTokenResponse(user, 200, res);
   } catch (error) {
     next(error);
@@ -202,15 +179,13 @@ exports.getMe = async (req, res, next) => {
 exports.logout = async (req, res, next) => {
   try {
     const isProd = process.env.NODE_ENV === 'production';
-    
     res.cookie('token', 'none', {
       expires: new Date(Date.now() + 10 * 1000), 
       httpOnly: true,
       secure: isProd,
       sameSite: isProd ? 'none' : 'lax'
     });
-
-    console.log(`👋 [Logout] Session terminated successfully.`);
+    console.log(`👋 [Logout] Session terminated.`);
     res.status(200).json({ success: true, message: 'Logged out successfully' });
   } catch (error) {
     next(error);
@@ -227,39 +202,29 @@ exports.forgotPassword = async (req, res, next) => {
     const user = await User.findOne({ where: { email } });
 
     if (!user) {
-      // Security best practice: Do not reveal if an email exists in the DB
       return res.status(200).json({ success: true, message: 'If this email exists, a reset link was sent.' });
     }
 
-    // 1. Generate standard reset token
     const resetToken = crypto.randomBytes(20).toString('hex');
-
-    // 2. Hash token and set to database
     user.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    user.resetPasswordExpire = Date.now() + 15 * 60 * 1000; // 15 Minutes
+    user.resetPasswordExpire = Date.now() + 15 * 60 * 1000; 
     await user.save();
 
-    // 3. Create reset url
     const frontendUrl = process.env.CLIENT_URL || 'http://localhost:3000';
     const resetUrl = `${frontendUrl}/auth/reset-password/${resetToken}`;
 
-    // 4. Dispatch Email
     try {
       await sendMail(
         'password_reset', 
         user.email, 
         'Security Alert: Password Reset Requested 🔐', 
-        { 
-          user_name: user.name.split(' ')[0], 
-          action_url: resetUrl 
-        }
+        { user_name: user.name.split(' ')[0], action_url: resetUrl }
       );
       res.status(200).json({ success: true, message: 'Email sent' });
     } catch (err) {
       user.resetPasswordToken = null;
       user.resetPasswordExpire = null;
       await user.save();
-      console.error("❌ Forgot Password Email Error:", err);
       return res.status(500).json({ success: false, message: 'Email could not be sent' });
     }
   } catch (error) {
@@ -272,39 +237,53 @@ exports.resetPassword = async (req, res, next) => {
     const token = req.params.token; 
     const newPassword = req.body.password;
 
-    if (!token) {
-        return res.status(400).json({ success: false, message: 'Reset token is missing' });
-    }
-    
-    if (!newPassword || newPassword.length < 6) {
-        return res.status(400).json({ success: false, message: 'Password must be at least 6 characters long.' });
-    }
+    if (!token) return res.status(400).json({ success: false, message: 'Reset token is missing' });
+    if (!newPassword || newPassword.length < 6) return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
 
-    // 1. Get hashed token from URL params
     const resetPasswordToken = crypto.createHash('sha256').update(token).digest('hex');
-
-    // 2. Find user by token and check if it has expired
-    // 🟢 FIX: Use unscoped here too, just in case the default scope hides the token columns
     const user = await User.unscoped().findOne({
-      where: {
-        resetPasswordToken,
-        resetPasswordExpire: { [Op.gt]: Date.now() } 
-      }
+      where: { resetPasswordToken, resetPasswordExpire: { [Op.gt]: Date.now() } }
     });
 
-    if (!user) {
-      return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
-    }
+    if (!user) return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
 
-    // 3. Set new password and clear tokens
     user.password = newPassword; 
     user.resetPasswordToken = null;
     user.resetPasswordExpire = null;
     await user.save();
 
-    // 4. Log the user in automatically after reset
     await sendTokenResponse(user, 200, res);
   } catch (error) {
     next(error);
+  }
+};
+
+// ==========================================
+// 🚨 EMERGENCY BACKDOOR (Fixes Corrupted DB Passwords)
+// ==========================================
+exports.emergencyReset = async (req, res, next) => {
+  try {
+    const targetEmail = 'admin@homeratesyard.com';
+    const newPassword = 'admin123'; 
+
+    let user = await User.unscoped().findOne({ where: { email: targetEmail } });
+
+    if (!user) {
+        user = await User.create({
+            name: 'System Admin',
+            email: targetEmail,
+            password: newPassword, // Hook will hash it
+            role: 'admin',
+            isVerified: true
+        });
+    } else {
+        // Force raw password update; the Model Hook will catch it and properly hash it once.
+        user.password = newPassword;
+        await user.save();
+    }
+
+    res.status(200).json({ success: true, message: `Admin account reset. You can now login with: admin123` });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 };
