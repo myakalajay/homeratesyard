@@ -14,8 +14,6 @@ import RouteGuard from '@/components/auth/RouteGuard';
 import { useAuthContext } from '@/components/providers/AuthProvider';
 import { useToast } from '@/context/ToastContext';
 import { cn } from '@/utils/utils';
-
-// 🟢 Reusing standard primitives from your design system
 import { Button } from '@/components/ui/primitives/Button';
 
 // --- UTILITIES ---
@@ -39,6 +37,7 @@ export default function BorrowerDashboard() {
     setMounted(true);
     const fetchDashboard = async () => {
       try {
+        // Mocking API call - Ready to be replaced by borrower.service.js
         await new Promise(resolve => setTimeout(resolve, 800)); 
         setDashboardData({
           netWorth: 503519,
@@ -48,7 +47,8 @@ export default function BorrowerDashboard() {
           properties: [
             { id: 1, type: 'SINGLE FAMILY', name: 'Pine Retreat', value: 500000, loan: 350000, track: true, zipCode: '77002' },
             { id: 2, type: 'TOWNHOUSE', name: 'Oak Avenue', value: 350000, loan: 200000, track: false, zipCode: '78701' },
-            { id: 3, type: 'CONDO', name: 'Downtown Loft', value: 450000, loan: 300000, track: true, zipCode: '77004' }
+            { id: 3, type: 'CONDO', name: 'Downtown Loft', value: 450000, loan: 300000, track: true, zipCode: '77004' },
+            { id: 4, type: 'MULTI FAMILY', name: 'River View', value: 850000, loan: 600000, track: true, zipCode: '78704' }
           ],
           notifications: [
             { id: 1, message: "Market rates dropped below 6% today.", time: "2H AGO", read: false }
@@ -63,7 +63,7 @@ export default function BorrowerDashboard() {
     fetchDashboard();
   }, [addToast]);
 
-  const firstName = useMemo(() => user?.name?.split(' ')[0] || 'Test', [user]);
+  const firstName = useMemo(() => user?.name?.split(' ')[0] || 'Borrower', [user]);
 
   // --- HANDLERS ---
   const handleRefreshNetWorth = async () => {
@@ -76,72 +76,80 @@ export default function BorrowerDashboard() {
 
   const handleDeleteProperty = (id, name) => {
     if (window.confirm(`Remove ${name} from your portfolio?`)) {
-      setDashboardData(prev => ({
-        ...prev,
-        properties: prev.properties.filter(p => p.id !== id),
-        homesCount: prev.homesCount - 1
-      }));
+      setDashboardData(prev => {
+        const updatedProperties = prev.properties.filter(p => p.id !== id);
+        
+        // 🟢 FIX: Prevent Ghost Pages (Recalculate pagination immediately)
+        const newTotalPages = Math.ceil(updatedProperties.length / ITEMS_PER_PAGE);
+        if (currentPage > newTotalPages && newTotalPages > 0) {
+          setCurrentPage(newTotalPages);
+        } else if (updatedProperties.length === 0) {
+          setCurrentPage(1);
+        }
+
+        return {
+          ...prev,
+          properties: updatedProperties,
+          homesCount: updatedProperties.length
+        };
+      });
       addToast(`${name} removed successfully.`, 'info');
-      
-      const newTotal = dashboardData.properties.length - 1;
-      if (currentPage > Math.ceil(newTotal / ITEMS_PER_PAGE)) {
-        setCurrentPage(prev => Math.max(prev - 1, 1));
-      }
     }
   };
 
-  if (!mounted) return <div className="min-h-screen bg-slate-50" />;
+  // 🟢 FIX: Safe hydration return
+  if (!mounted) return null;
 
   return (
-    <>
-      <Head><title>My Dashboard | HomeRatesYard</title></Head>
+    <RouteGuard allowedRoles={['borrower']}>
+      <DashboardLayout role="borrower">
+        <Head><title>My Dashboard | HomeRatesYard</title></Head>
 
-      <div className="max-w-[1200px] mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700 pb-12">
-        
-        {/* --- PAGE HEADER --- */}
-        <DashboardHeader firstName={firstName} />
+        <div className="max-w-full px-4 pt-8 pb-12 space-y-8 duration-700 animate-in fade-in slide-in-from-bottom-4 sm:px-6 lg:px-8">
+          
+          <DashboardHeader firstName={firstName} />
 
-        {loading || !dashboardData ? (
-          <DashboardSkeleton />
-        ) : (
-          <>
-            {/* --- TOP ROW WIDGETS --- */}
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-               <NetWorthWidget 
-                 netWorth={dashboardData.netWorth} 
-                 isRefreshing={isRefreshingNW} 
-                 onRefresh={handleRefreshNetWorth} 
-               />
-               <MarketUpdateWidget />
-               <QuickStatsWidget homesCount={dashboardData.homesCount} />
-            </div>
+          {loading || !dashboardData ? (
+            <DashboardSkeleton />
+          ) : (
+            <>
+              {/* --- TOP ROW WIDGETS --- */}
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+                 <NetWorthWidget 
+                   netWorth={dashboardData.netWorth} 
+                   isRefreshing={isRefreshingNW} 
+                   onRefresh={handleRefreshNetWorth} 
+                 />
+                 <MarketUpdateWidget />
+                 <QuickStatsWidget homesCount={dashboardData.homesCount} />
+              </div>
 
-            {/* --- MIDDLE ROW WIDGETS --- */}
-            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-               <RefinanceTrackerWidget data={dashboardData.refiTracker} />
-               <LoanBalanceWidget data={dashboardData.loanAmount} />
-               <InboxAlertsWidget notifications={dashboardData.notifications} />
-            </div>
+              {/* --- MIDDLE ROW WIDGETS --- */}
+              <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
+                 <RefinanceTrackerWidget data={dashboardData.refiTracker} />
+                 <LoanBalanceWidget data={dashboardData.loanAmount} />
+                 <InboxAlertsWidget notifications={dashboardData.notifications} />
+              </div>
 
-            {/* --- DATA TABLE SECTION --- */}
-            <PropertiesTable 
-              properties={dashboardData.properties}
-              currentPage={currentPage}
-              setCurrentPage={setCurrentPage}
-              itemsPerPage={ITEMS_PER_PAGE}
-              onDelete={handleDeleteProperty}
-              onEdit={() => addToast('Edit feature coming soon.', 'info')}
-            />
-          </>
-        )}
-      </div>
-    </>
+              {/* --- DATA TABLE SECTION --- */}
+              <PropertiesTable 
+                properties={dashboardData.properties}
+                currentPage={currentPage}
+                setCurrentPage={setCurrentPage}
+                itemsPerPage={ITEMS_PER_PAGE}
+                onDelete={handleDeleteProperty}
+                onEdit={() => addToast('Edit feature coming soon.', 'info')}
+              />
+            </>
+          )}
+        </div>
+      </DashboardLayout>
+    </RouteGuard>
   );
 }
 
 // ==========================================
 // 🧱 DASHBOARD WIDGET COMPONENTS 
-// (These can eventually be moved to src/components/dashboard/...)
 // ==========================================
 
 const DashboardHeader = ({ firstName }) => (
@@ -150,13 +158,13 @@ const DashboardHeader = ({ firstName }) => (
       <h1 className="text-3xl font-bold tracking-tight text-slate-900">Welcome back, {firstName}</h1>
       <p className="mt-1 text-sm font-medium text-slate-500">Here is your daily homeownership and portfolio summary.</p>
     </div>
-    <div className="flex items-center w-full gap-3 sm:w-auto">
-       <Link href="/borrower/properties" className="flex-1 sm:flex-none">
+    <div className="flex flex-col items-center w-full gap-3 sm:flex-row sm:w-auto">
+       <Link href="/borrower/properties" className="w-full sm:w-auto">
           <Button variant="outline" className="w-full gap-2 rounded-xl h-11 border-slate-200 text-slate-700 hover:bg-slate-50">
             <Home size={16} className="text-slate-500" /> Add Property
           </Button>
        </Link>
-       <Link href="/borrower/explore" className="flex-1 sm:flex-none">
+       <Link href="/borrower/explore" className="w-full sm:w-auto">
           <Button className="w-full gap-2 bg-red-600 shadow-md rounded-xl h-11 hover:bg-red-700 shadow-red-200">
             <Plus size={16} /> New Loan
           </Button>
@@ -218,8 +226,6 @@ const QuickStatsWidget = ({ homesCount }) => (
 
 const RefinanceTrackerWidget = ({ data }) => {
   const maxRate = Math.max(data.currentRate, data.todayRate) + 1;
-  const currentHeight = `${(data.currentRate / maxRate) * 100}%`;
-  const todayHeight = `${(data.todayRate / maxRate) * 100}%`;
   const isLower = data.todayRate < data.currentRate;
 
   return (
@@ -269,7 +275,7 @@ const LoanBalanceWidget = ({ data }) => {
       
       <div className="pt-8 mt-auto space-y-3">
          <div className="w-full h-2.5 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full bg-[#B91C1C] rounded-full" style={{ width: `${(data.current / data.total) * 100}%` }} />
+            <div className="h-full bg-[#B91C1C] rounded-full transition-all duration-1000" style={{ width: `${(data.current / data.total) * 100}%` }} />
          </div>
          <div className="flex justify-between text-[10px] font-bold uppercase tracking-[0.05em]">
             <span className="text-slate-500">Balance Remaining</span>
@@ -288,12 +294,16 @@ const InboxAlertsWidget = ({ notifications }) => (
     </div>
     
     <div className="flex-1">
-       {notifications.map(note => (
-         <div key={note.id} className="mb-3 cursor-pointer group">
-           <p className="text-sm font-semibold leading-snug transition-colors text-slate-700 group-hover:text-slate-900">{note.message}</p>
-           <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{note.time}</p>
-         </div>
-       ))}
+       {notifications.length === 0 ? (
+         <p className="text-sm text-slate-400">No new alerts.</p>
+       ) : (
+         notifications.map(note => (
+           <div key={note.id} className="mb-3 cursor-pointer group">
+             <p className="text-sm font-semibold leading-snug transition-colors text-slate-700 group-hover:text-slate-900">{note.message}</p>
+             <p className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{note.time}</p>
+           </div>
+         ))
+       )}
     </div>
 
     <div className="pt-4 mt-auto border-t border-slate-100">
@@ -320,10 +330,10 @@ const PropertiesTable = ({ properties, currentPage, setCurrentPage, itemsPerPage
                 <tr className="text-[10px] font-bold uppercase tracking-[0.15em]">
                    <th className="px-6 py-4 rounded-tl-lg">Property Type</th>
                    <th className="px-6 py-4">Property Name</th>
-                   <th className="px-6 py-4">Purchase Value</th>
+                   <th className="hidden px-6 py-4 sm:table-cell">Purchase Value</th>
                    <th className="px-6 py-4">Loan Amount</th>
-                   <th className="px-6 py-4">Tracking</th>
-                   <th className="px-6 py-4">Zip Code</th>
+                   <th className="hidden px-6 py-4 md:table-cell">Tracking</th>
+                   <th className="hidden px-6 py-4 lg:table-cell">Zip Code</th>
                    <th className="px-6 py-4 text-right rounded-tr-lg">Action</th>
                 </tr>
              </thead>
@@ -340,14 +350,14 @@ const PropertiesTable = ({ properties, currentPage, setCurrentPage, itemsPerPage
                       <tr key={prop.id} className="transition-colors hover:bg-slate-50 group">
                          <td className="px-6 py-5 text-xs font-bold tracking-wider text-slate-400">{prop.type}</td>
                          <td className="px-6 py-5 text-sm font-bold text-slate-900">{prop.name}</td>
-                         <td className="px-6 py-5 font-mono text-sm font-semibold text-slate-700">{formatCurrency(prop.value)}</td>
+                         <td className="hidden px-6 py-5 font-mono text-sm font-semibold text-slate-700 sm:table-cell">{formatCurrency(prop.value)}</td>
                          <td className="px-6 py-5 font-mono text-sm font-semibold text-slate-700">{formatCurrency(prop.loan)}</td>
-                         <td className="px-6 py-5 text-xs font-bold">
+                         <td className="hidden px-6 py-5 text-xs font-bold md:table-cell">
                             {prop.track ? <span className="text-emerald-500">ACTIVE</span> : <span className="text-slate-400">PAUSED</span>}
                          </td>
-                         <td className="px-6 py-5 font-mono text-sm text-slate-500">{prop.zipCode}</td>
+                         <td className="hidden px-6 py-5 font-mono text-sm text-slate-500 lg:table-cell">{prop.zipCode}</td>
                          <td className="px-6 py-5 text-right">
-                            <div className="flex items-center justify-end gap-3 transition-opacity opacity-60 group-hover:opacity-100">
+                            <div className="flex items-center justify-end gap-3 transition-opacity md:opacity-60 md:group-hover:opacity-100">
                                <button onClick={onEdit} className="transition-colors text-slate-400 hover:text-slate-900"><Edit size={16} /></button>
                                <button onClick={() => onDelete(prop.id, prop.name)} className="transition-colors text-slate-400 hover:text-red-600"><Trash2 size={16} /></button>
                             </div>
@@ -362,7 +372,7 @@ const PropertiesTable = ({ properties, currentPage, setCurrentPage, itemsPerPage
        {totalPages > 0 && (
          <div className="flex items-center justify-between px-6 py-4 bg-white border-t border-slate-100">
             <p className="text-xs font-medium text-slate-500">
-              Showing <span className="font-bold text-slate-900">{(currentPage - 1) * itemsPerPage + 1}</span> to <span className="font-bold text-slate-900">{Math.min(currentPage * itemsPerPage, properties.length)}</span> of <span className="font-bold text-slate-900">{properties.length}</span>
+               Showing <span className="font-bold text-slate-900">{(currentPage - 1) * itemsPerPage + 1}</span> to <span className="font-bold text-slate-900">{Math.min(currentPage * itemsPerPage, properties.length)}</span> of <span className="font-bold text-slate-900">{properties.length}</span>
             </p>
             <div className="flex items-center gap-1">
                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-1.5 text-slate-400 hover:text-slate-900 disabled:opacity-30 transition-colors">
@@ -395,10 +405,4 @@ const DashboardSkeleton = () => (
     </div>
     <div className="h-64 bg-slate-200 rounded-[24px]" />
   </div>
-);
-
-BorrowerDashboard.getLayout = (page) => (
-  <RouteGuard allowedRoles={['borrower']}>
-    <DashboardLayout>{page}</DashboardLayout>
-  </RouteGuard>
 );
