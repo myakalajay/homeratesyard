@@ -54,7 +54,7 @@ export default function BorrowerDashboard() {
       // Deep hydration to handle the axios response wrapper cleanly
       const payload = response?.data?.data || response?.data || response;
       
-      if (!payload || !payload.activeApplication) {
+      if (!payload || typeof payload !== 'object') {
           throw new Error("Invalid payload received from server.");
       }
 
