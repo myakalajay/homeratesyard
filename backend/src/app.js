@@ -18,28 +18,30 @@ const app = express();
 app.use(helmet()); 
 
 /**
- * 🟢 SMART CORS CONFIGURATION
+ * 🟢 STRICT PRODUCTION CORS CONFIGURATION
+ * Localhost removed. Only accepts traffic from Vercel & verified origins.
  */
 const allowedOrigins = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
   'https://homeratesyard.vercel.app',
   process.env.CLIENT_URL
 ].filter(Boolean);
 
 app.use(cors({ 
   origin: function (origin, callback) {
+    // Allow requests with no origin (like Postman or mobile apps)
     if (!origin) return callback(null, true);
     
     // Safely strip trailing slashes if they exist
     const cleanOrigin = origin.replace(/\/$/, "");
+    
+    // Allow wildcard subdomains from Vercel deployments
     const isVercel = cleanOrigin.endsWith('.vercel.app');
     const isAllowed = allowedOrigins.includes(cleanOrigin) || isVercel;
 
     if (isAllowed) {
       callback(null, true);
     } else {
-      console.warn(`🚫 CORS Blocked for origin: ${origin}`);
+      console.warn(`🚫 [Security] CORS Blocked unauthorized origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   }, 
@@ -59,13 +61,16 @@ app.use(express.json({ limit: '50kb' }));
 app.use(express.urlencoded({ extended: true, limit: '50kb' }));
 app.use(cookieParser());
 
-if (process.env.NODE_ENV === 'development') {
+// 🟢 FIX: Dynamic Production Logging for Render
+if (process.env.NODE_ENV === 'production') {
+  app.use(morgan('common')); // Logs real IPs and standard web traffic
+} else {
   app.use(morgan('dev')); 
 }
 
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
-// Global Rate Limiting
+// Global Rate Limiting (Prevents DDoS attacks during your demo)
 const limiter = rateLimit({
   windowMs: 10 * 60 * 1000, 
   max: 200, 
@@ -75,11 +80,9 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
-
 // ==========================================
 // 🚧 SYSTEM INTERCEPTORS (Must go before routes)
 // ==========================================
-// 🟢 FIX: Moved Maintenance Mode to the top so it actually intercepts traffic!
 try {
   const maintenanceMode = require('./middleware/maintenanceMode.js');
   app.use(maintenanceMode);
@@ -87,13 +90,9 @@ try {
   console.warn('⚠️ [Maintenance] Middleware not found. System will bypass maintenance checks.');
 }
 
-
 // =======================
 // 🛤️ Routes (Mounting)
 // =======================
-
-// 🟢 FIX: Removed explicit email.routes.js import since it was baked into admin.routes.js previously.
-// This prevents MODULE_NOT_FOUND crashes on Render.
 
 app.use('/api/auth', require('./routes/auth.routes')); 
 app.use('/api/users', require('./routes/user.routes')); 
@@ -101,16 +100,23 @@ app.use('/api/loans', require('./routes/loan.routes'));
 app.use('/api/documents', require('./routes/document.routes')); 
 app.use('/api/payments', require('./routes/payment.routes')); 
 app.use('/api/dashboard', require('./routes/dashboard.routes'));
-app.use('/api/admin', require('./routes/admin.routes')); // Emails are safely inside here now
+app.use('/api/admin', require('./routes/admin.routes')); 
 app.use('/api/notifications', require('./routes/notification.routes'));
 app.use('/api/tickets', require('./routes/ticket.routes'));
+
+// 🟢 CRITICAL FIX: The new Borrower Dashboard endpoints!
+try {
+    app.use('/api/borrower', require('./routes/borrower.routes'));
+} catch (e) {
+    console.warn('⚠️ [Routes] Borrower routes not found yet. Skipping mount.');
+}
 
 
 // Health Check
 app.get('/', (req, res) => {
   res.status(200).json({ 
     message: '🚀 HomeRatesYard API Gateway is Active', 
-    env: process.env.NODE_ENV,
+    env: process.env.NODE_ENV || 'production',
     timestamp: new Date() 
   });
 });
@@ -139,7 +145,7 @@ app.use((err, req, res, next) => {
     }
 
     if (err.name === 'SequelizeValidationError') {
-        // 🟢 FIX: Maps array of errors to a single comma-separated string to prevent Frontend UI crashes
+        // Maps array of errors to a single comma-separated string to prevent Frontend UI crashes
         const cleanMessage = err.errors.map(e => e.message).join(', ');
         return res.status(400).json({ success: false, message: cleanMessage });
     }

@@ -383,7 +383,7 @@ const WebsiteNavbar = () => {
 
                 {/* Profile Dropdown */}
                 {showProfile && (
-                  <div className="absolute right-0 top-full mt-4 w-64 origin-top-right rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl animate-in fade-in zoom-in-95 duration-200 z-[120]">
+                  <div className="absolute right-0 top-full mt-4 w-64 origin-top-right rounded-md border border-slate-200 bg-white p-2 shadow-xl animate-in fade-in zoom-in-95 duration-200 z-[120]">
                     <div className="px-3 py-3 mb-2 border-b border-slate-100">
                       <p className="text-sm font-bold truncate text-slate-900">
                         {isLoggingOut ? 'Signing out...' : (user?.name || 'Authorized User')}
@@ -394,7 +394,7 @@ const WebsiteNavbar = () => {
                       <Link 
                         href={dashboardRoute} 
                         onClick={() => setShowProfile(false)}
-                        className="flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                        className="flex items-center gap-3 px-3 py-2.5 text-sm font-semibold text-slate-600 rounded-md hover:bg-slate-100 hover:text-slate-900 transition-colors"
                       >
                         <LayoutDashboard size={18} className="text-slate-400" />
                         <span>Command Center</span>
@@ -402,7 +402,7 @@ const WebsiteNavbar = () => {
                       <Link 
                         href={`${dashboardRoute}/profile`} 
                         onClick={() => setShowProfile(false)}
-                        className="flex items-center gap-3 px-3 py-2.5 text-sm font-bold text-slate-600 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-colors"
+                        className="flex items-center gap-3 px-3 py-2.5 text-sm font-semibold text-slate-600 rounded-md hover:bg-slate-100 hover:text-slate-900 transition-colors"
                       >
                         <Settings size={18} className="text-slate-400" />
                         <span>Account Settings</span>
@@ -412,10 +412,10 @@ const WebsiteNavbar = () => {
                     <button 
                       onClick={handleLogout}
                       disabled={isLoggingOut}
-                      className="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-black tracking-wide text-red-600 rounded-xl hover:bg-red-50 transition-colors disabled:opacity-50"
+                      className="flex w-full items-center gap-3 px-3 py-2.5 text-sm font-semibold tracking-wide text-red-600 rounded-md hover:bg-red-100 transition-colors disabled:opacity-50"
                     >
                       <LogOut size={18} />
-                      <span>SECURE SIGN OUT</span>
+                      <span>Secure Sign Out</span>
                     </button>
                   </div>
                 )}

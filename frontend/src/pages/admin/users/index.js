@@ -5,7 +5,7 @@ import Head from 'next/head';
 import { 
   Search, Shield, UserCheck, UserMinus, BadgeCheck, 
   ArrowLeft, ArrowRight, Filter as FilterIcon, Settings, Clock, 
-  ShieldAlert, Users, Activity, MoreVertical, Mail, RefreshCw, Database
+  ShieldAlert, Users, Activity, Mail, RefreshCw, Database, CheckCircle
 } from 'lucide-react';
 
 import RouteGuard from '@/components/auth/RouteGuard';
@@ -14,7 +14,7 @@ import { adminService } from '@/services/admin.service';
 import { useToast } from '@/context/ToastContext';
 import { cn } from '@/utils/utils';
 
-// Modals (Ensure these paths match your project structure)
+// Modals
 import EditUserModal from '@/components/modals/EditUserModal';
 import UserHistoryDrawer from '@/components/ui/UserHistoryDrawer';
 
@@ -25,9 +25,10 @@ export default function UserManagementPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
   
-  // 🟢 STRICT DEFAULTS for pagination & metrics
+  const [roleFilter, setRoleFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, totalUsers: 0 });
   const [metrics, setMetrics] = useState({ verified: 0, pending: 0 });
 
@@ -37,6 +38,7 @@ export default function UserManagementPage() {
   const [isHistoryDrawerOpen, setIsHistoryDrawerOpen] = useState(false);
   const [userToDelete, setUserToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
   useEffect(() => {
     loadUsers(pagination.page);
@@ -48,36 +50,34 @@ export default function UserManagementPage() {
     setError(false);
     try {
       const response = await adminService.getUsers({ page, limit: 15 });
-      const data = response?.data || response || {};
       
-      // 🟢 100% DYNAMIC HYDRATION: Zero mock data.
-      const fetchedUsers = Array.isArray(data?.users) ? data.users : (Array.isArray(data) ? data : []);
+      const payload = response?.data?.data || response?.data || response || {};
+      const fetchedUsers = Array.isArray(payload?.users) ? payload.users : (Array.isArray(payload) ? payload : []);
       
       setUsers(fetchedUsers);
       setPagination(prev => ({ 
         ...prev, 
-        totalPages: Number(data?.totalPages ?? 1),
-        totalUsers: Number(data?.total ?? fetchedUsers.length)
+        totalPages: Number(payload?.totalPages ?? 1),
+        // DB Total vs Viewable Total (Explains the 5 vs 4 discrepancy)
+        totalUsers: Number(payload?.total ?? payload?.totalUsers ?? payload?.total_users ?? fetchedUsers.length)
       }));
 
-      // Dynamically calculate metrics for the current dataset or use API totals if provided
       setMetrics({
-        verified: Number(data?.verifiedCount ?? fetchedUsers.filter(u => u.isVerified).length),
-        pending: Number(data?.pendingCount ?? fetchedUsers.filter(u => !u.isVerified).length)
+        verified: Number(payload?.verifiedCount ?? payload?.verified_count ?? fetchedUsers.filter(u => u.isVerified).length),
+        pending: Number(payload?.pendingCount ?? payload?.pending_count ?? fetchedUsers.filter(u => !u.isVerified).length)
       });
 
     } catch (err) {
       console.error("Failed to sync user directory:", err);
       setError(true);
       addToast("Failed to secure connection to user database.", "error");
-      setUsers([]); // Safe fallback to prevent crash
+      setUsers([]); 
       setMetrics({ verified: 0, pending: 0 });
     } finally {
       setLoading(false);
     }
   };
 
-  // 🟢 SAFE MULTI-FILTER LOGIC
   const filteredUsers = useMemo(() => {
     const term = (searchTerm || "").toLowerCase();
     return (users || []).filter(u => {
@@ -88,11 +88,14 @@ export default function UserManagementPage() {
       
       const matchesRole = roleFilter === 'all' || (u?.role || "").toLowerCase() === roleFilter.toLowerCase();
       
-      return matchesSearch && matchesRole;
+      const matchesStatus = statusFilter === 'all' 
+        ? true 
+        : statusFilter === 'verified' ? u?.isVerified : !u?.isVerified;
+      
+      return matchesSearch && matchesRole && matchesStatus;
     });
-  }, [users, searchTerm, roleFilter]);
+  }, [users, searchTerm, roleFilter, statusFilter]);
 
-  // Enterprise Role Styling
   const getRoleStyle = (role) => {
     const lowerRole = (role || "").toLowerCase();
     if (lowerRole.includes('super')) return "bg-purple-50 text-purple-700 border-purple-200";
@@ -100,6 +103,21 @@ export default function UserManagementPage() {
     if (lowerRole.includes('lender')) return "bg-blue-50 text-blue-700 border-blue-200";
     if (lowerRole.includes('ai')) return "bg-emerald-50 text-emerald-700 border-emerald-200";
     return "bg-slate-50 text-slate-600 border-slate-200";
+  };
+
+  const handleVerifyUser = async (user) => {
+    if (isVerifying) return;
+    setIsVerifying(true);
+    addToast(`Verifying ${user.name}...`, "info");
+    try {
+      await adminService.updateUser(user.id, { isVerified: true });
+      addToast(`${user.name} has been successfully verified!`, "success");
+      loadUsers(pagination.page); 
+    } catch (err) {
+      addToast(`Failed to verify ${user.name}.`, "error");
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   const handleDeleteConfirm = async () => {
@@ -130,7 +148,6 @@ export default function UserManagementPage() {
         <div className="flex flex-col items-start justify-between gap-4 mb-8 sm:flex-row sm:items-end">
           <div>
             <div className="flex items-center gap-2 mb-2">
-
               <h1 className="text-3xl font-bold text-[#0A1128] tracking-tight">Identity & Access</h1>
             </div>
             <p className="text-sm font-medium text-slate-500">
@@ -144,48 +161,79 @@ export default function UserManagementPage() {
               disabled={loading}
               className="flex items-center gap-2 px-5 py-2.5 text-xs font-bold transition-all bg-white border shadow-sm border-slate-200 rounded-lg hover:bg-slate-50 hover:border-slate-300 active:scale-95 text-[#0A1128] disabled:opacity-70"
             >
-              <RefreshCw size={14} className={loading ? "animate-spin text-red-600" : "text-slate-400"} />
+              <RefreshCw size={14} className={loading ? "animate-spin text-blue-600" : "text-slate-400"} />
               {loading ? "Syncing Directory..." : "Sync Directory"}
             </button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 mb-8 sm:gap-6 sm:grid-cols-3">
-          <KPIStoreCard title="Total Identities" value={(pagination.totalUsers || 0).toLocaleString()} icon={<Users className="text-blue-600" />} loading={loading} />
+          <KPIStoreCard title="Manageable Identities" value={(pagination.totalUsers || 0).toLocaleString()} icon={<Users className="text-blue-600" />} loading={loading} />
           <KPIStoreCard title="Verified Lenders" value={(metrics.verified || 0).toLocaleString()} icon={<BadgeCheck className="text-emerald-600" />} loading={loading} />
           <KPIStoreCard title="Access Requests" value={(metrics.pending || 0).toLocaleString()} icon={<ShieldAlert className="text-amber-600" />} highlight={metrics.pending > 0} loading={loading} />
         </div>
 
-        {/* --- 2. CONTROLS & SEARCH --- */}
-        <div className="flex flex-col items-center justify-between gap-4 mb-6 sm:flex-row">
-          <div className="flex items-center w-full gap-3 sm:w-auto">
-            <div className="relative flex-1 sm:w-80">
-              <Search className="absolute -translate-y-1/2 left-3 top-1/2 text-slate-400" size={16} />
+        {/* --- 2. CONTROLS & SEARCH (🟢 UI FIX: Restored perfectly inline flex layout) --- */}
+        <div className="flex flex-col gap-4 mb-6 xl:flex-row xl:items-center xl:justify-between">
+          <div className="flex flex-col w-full gap-3 sm:flex-row sm:items-center xl:w-auto">
+            
+            {/* Search Input */}
+            <div className="relative w-full sm:w-72 shrink-0">
+              <Search className="absolute -translate-y-1/2 pointer-events-none left-3 top-1/2 text-slate-400" size={16} />
               <input 
                 type="text" 
                 placeholder="Search name, email, or NMLS..." 
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-[#0A1128]/10 focus:border-[#0A1128] outline-none transition-all shadow-sm"
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-medium focus:ring-2 focus:ring-[#0A1128]/10 focus:border-[#0A1128] outline-none transition-all shadow-sm h-11"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
-            <div className="relative">
+
+            {/* Role Filter */}
+            <div className="relative w-full sm:w-44 shrink-0">
               <select 
                 value={roleFilter}
                 onChange={(e) => setRoleFilter(e.target.value)}
-                className="pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#0A1128] hover:bg-slate-50 transition-all shadow-sm appearance-none outline-none focus:ring-2 focus:ring-[#0A1128]/10"
+                className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#0A1128] hover:bg-slate-50 transition-all shadow-sm appearance-none outline-none focus:ring-2 focus:ring-[#0A1128]/10 h-11 cursor-pointer"
               >
                 <option value="all">All Roles</option>
                 <option value="lender">Lenders</option>
                 <option value="admin">Administrators</option>
                 <option value="superadmin">Super Admins</option>
-                <option value="user">Standard Users</option>
+                <option value="borrower">Borrowers</option>
               </select>
               <FilterIcon size={14} className="absolute -translate-y-1/2 pointer-events-none left-4 top-1/2 text-slate-400" />
+              {/* Custom Chevron */}
+              <div className="absolute -translate-y-1/2 pointer-events-none right-4 top-1/2">
+                <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 1L5 5L9 1" stroke="#94A3B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
             </div>
+
+            {/* Status Filter */}
+            <div className="relative w-full sm:w-44 shrink-0">
+              <select 
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="w-full pl-10 pr-8 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-[#0A1128] hover:bg-slate-50 transition-all shadow-sm appearance-none outline-none focus:ring-2 focus:ring-[#0A1128]/10 h-11 cursor-pointer"
+              >
+                <option value="all">All Statuses</option>
+                <option value="verified">Verified Only</option>
+                <option value="pending">Pending Only</option>
+              </select>
+              <Shield size={14} className="absolute -translate-y-1/2 pointer-events-none left-4 top-1/2 text-slate-400" />
+              {/* Custom Chevron */}
+              <div className="absolute -translate-y-1/2 pointer-events-none right-4 top-1/2">
+                <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M1 1L5 5L9 1" stroke="#94A3B8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+            </div>
+
           </div>
           
-          <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-slate-400">
+          <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-slate-400 mt-2 xl:mt-0 shrink-0">
             <Database size={14} className="text-slate-400" /> RBAC Security Active
           </div>
         </div>
@@ -232,7 +280,7 @@ export default function UserManagementPage() {
                 )}
 
                 {!loading && !error && filteredUsers.map((user) => (
-                  <tr key={user.id} className="transition-all hover:bg-slate-50/50 group">
+                  <tr key={user.id} className="transition-colors hover:bg-slate-50/50">
                     <td className="p-4 sm:p-6">
                       <div className="flex items-center gap-4">
                         <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center font-bold text-[#0A1128] text-xs shrink-0 shadow-sm">
@@ -264,15 +312,19 @@ export default function UserManagementPage() {
                       </div>
                     </td>
                     <td className="p-4 sm:p-6">
-                      {/* Desktop Actions */}
-                      <div className="justify-end hidden gap-2 transition-opacity opacity-0 sm:flex group-hover:opacity-100">
-                         <ActionIconButton icon={<Settings size={16} />} onClick={() => { setSelectedUser(user); setIsEditModalOpen(true); }} />
-                         <ActionIconButton icon={<Clock size={16} />} onClick={() => { setSelectedUser(user); setIsHistoryDrawerOpen(true); }} />
-                         <ActionIconButton icon={<UserMinus size={16} />} onClick={() => { setUserToDelete(user); }} color="red" />
-                      </div>
-                      {/* Mobile Actions Fallback */}
-                      <div className="flex justify-end sm:hidden">
-                         <ActionIconButton icon={<MoreVertical size={16} />} onClick={() => { setSelectedUser(user); setIsEditModalOpen(true); }} />
+                      {/* 🟢 HOVER FIX: Action buttons are permanently visible now */}
+                      <div className="flex items-center justify-end gap-2">
+                         {!user?.isVerified && (
+                           <ActionIconButton 
+                             icon={<CheckCircle size={16} />} 
+                             onClick={() => handleVerifyUser(user)} 
+                             color="emerald" 
+                             title="Approve & Verify User"
+                           />
+                         )}
+                         <ActionIconButton icon={<Settings size={16} />} onClick={() => { setSelectedUser(user); setIsEditModalOpen(true); }} title="Edit User Settings" />
+                         <ActionIconButton icon={<Clock size={16} />} onClick={() => { setSelectedUser(user); setIsHistoryDrawerOpen(true); }} title="View Audit Logs" />
+                         <ActionIconButton icon={<UserMinus size={16} />} onClick={() => { setUserToDelete(user); }} color="red" title="Revoke Access" />
                       </div>
                     </td>
                   </tr>
@@ -291,14 +343,14 @@ export default function UserManagementPage() {
                 <button 
                   disabled={pagination.page === 1}
                   onClick={() => setPagination(prev => ({ ...prev, page: prev.page - 1 }))}
-                  className="p-2 transition-all bg-white border rounded-lg shadow-sm border-slate-200 text-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                  className="flex items-center justify-center w-10 h-10 transition-all bg-white border rounded-lg shadow-sm border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <ArrowLeft size={16} />
                 </button>
                 <button 
                   disabled={pagination.page === pagination.totalPages}
                   onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
-                  className="p-2 transition-all bg-white border rounded-lg shadow-sm border-slate-200 text-slate-400 hover:bg-slate-50 disabled:opacity-50"
+                  className="flex items-center justify-center w-10 h-10 transition-all bg-white border rounded-lg shadow-sm border-slate-200 text-slate-400 hover:bg-slate-50 hover:text-slate-700 disabled:opacity-50 disabled:pointer-events-none"
                 >
                   <ArrowRight size={16} />
                 </button>
@@ -308,7 +360,23 @@ export default function UserManagementPage() {
         </div>
       </div>
 
-      {/* --- DRAWERS & MODALS --- */}
+      {/* Edit Modal */}
+      {isEditModalOpen && selectedUser && (
+         <EditUserModal 
+           isOpen={isEditModalOpen}
+           user={selectedUser}
+           onClose={() => {
+             setIsEditModalOpen(false);
+             setSelectedUser(null);
+           }}
+           onSuccess={() => {
+             setIsEditModalOpen(false);
+             loadUsers(pagination.page);
+           }}
+         />
+      )}
+
+      {/* History Drawer */}
       {isHistoryDrawerOpen && selectedUser && (
         <UserHistoryDrawer 
           isOpen={isHistoryDrawerOpen} 
@@ -317,7 +385,7 @@ export default function UserManagementPage() {
         />
       )}
 
-      {/* Destructive Deletion Modal Inline for Data Safety */}
+      {/* Destructive Deletion Modal */}
       {userToDelete && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="w-full max-w-md p-6 bg-white shadow-2xl rounded-2xl animate-in zoom-in-95">
@@ -386,13 +454,20 @@ function KPIStoreCard({ title, value, icon, highlight, loading }) {
   );
 }
 
-function ActionIconButton({ icon, onClick, color }) {
+function ActionIconButton({ icon, onClick, color, title }) {
+  const colorStyles = {
+    red: "hover:border-red-200 hover:text-red-600 hover:bg-red-50 text-slate-400",
+    emerald: "hover:border-emerald-200 hover:text-emerald-700 hover:bg-emerald-50 text-emerald-600",
+    default: "hover:border-slate-300 hover:text-[#0A1128] hover:bg-slate-50 text-slate-400"
+  };
+
   return (
     <button 
+      title={title}
       onClick={onClick}
       className={cn(
-        "p-2 transition-colors border border-transparent rounded-lg text-slate-400 shadow-sm border-slate-200",
-        color === 'red' ? "hover:border-red-200 hover:text-red-600 hover:bg-red-50" : "hover:border-slate-300 hover:text-[#0A1128] hover:bg-slate-50"
+        "p-2 transition-all border border-transparent rounded-lg shadow-sm border-slate-200 active:scale-95 bg-white",
+        colorStyles[color] || colorStyles.default
       )}
     >
       {icon}

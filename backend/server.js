@@ -2,10 +2,10 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const fs = require('fs');
-const bcrypt = require('bcryptjs'); // 🟢 FIX: Imported bcrypt for the Self-Healing Seeder
+const bcrypt = require('bcryptjs'); 
 
 // Initialize the Express app configuration
-const app = require('./src/app');
+const app = require('./src/app'); // Adjust path to app.js if necessary
 
 // 🟢 CRITICAL: Import 'db' from models
 const db = require('./src/models'); 
@@ -21,36 +21,42 @@ try {
 }
 
 const PORT = process.env.PORT || 5000;
-const NODE_ENV = process.env.NODE_ENV || 'development';
+// 🟢 FIX: Default strictly to production
+const NODE_ENV = process.env.NODE_ENV || 'production'; 
 
 // ==========================================
-// 📂 STATIC ASSET & FILESYSTEM INITIALIZATION
+// 📂 CLOUD-SAFE STATIC ASSET INITIALIZATION
 // ==========================================
-// 1. Ensure Uploads Directory Exists
-const avatarPath = path.join(__dirname, 'uploads/avatars');
-if (!fs.existsSync(avatarPath)) {
-  fs.mkdirSync(avatarPath, { recursive: true });
-}
-app.use('/uploads/avatars', express.static(avatarPath));
+try {
+  // 1. Ensure Uploads Directory Exists Safely
+  const avatarPath = path.join(__dirname, 'uploads/avatars');
+  if (!fs.existsSync(avatarPath)) {
+    fs.mkdirSync(avatarPath, { recursive: true });
+  }
+  app.use('/uploads/avatars', express.static(avatarPath));
 
-// 2. Ensure Email Templates Directory & Base Files Exist
-const templateDir = path.join(__dirname, 'src/templates/emails');
-if (!fs.existsSync(templateDir)) {
-  fs.mkdirSync(templateDir, { recursive: true });
-  console.log('📁 [System] Initialized email template directory.');
-  
-  // Auto-generate the base.html if it's completely missing
-  const baseHtml = `<!DOCTYPE html><html><body style="font-family: sans-serif; padding: 20px;">
-    <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;">
-        <div style="background-color: #0A1128; padding: 20px; color: white; text-align: center;"><h2>HomeRatesYard</h2></div>
-        <div style="padding: 30px; color: #334155;">{{content}}</div>
-        <div style="background-color: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8;">© HomeRatesYard Enterprise</div>
-    </div></body></html>`;
-  
-  fs.writeFileSync(path.join(templateDir, 'base.html'), baseHtml);
-  fs.writeFileSync(path.join(templateDir, 'welcome.html'), '<h2>Welcome {{user_name}}!</h2><p>Click <a href="{{action_url}}">here</a> to login.</p>');
-  fs.writeFileSync(path.join(templateDir, 'password_reset.html'), '<h2>Password Reset</h2><p>Click <a href="{{action_url}}">here</a> to securely reset your password.</p>');
+  // 2. Ensure Email Templates Directory Exists Safely
+  const templateDir = path.join(__dirname, 'src/templates/emails');
+  if (!fs.existsSync(templateDir)) {
+    fs.mkdirSync(templateDir, { recursive: true });
+    console.log('📁 [System] Initialized email template directory.');
+    
+    // Auto-generate the base.html if it's completely missing
+    const baseHtml = `<!DOCTYPE html><html><body style="font-family: sans-serif; padding: 20px;">
+      <div style="max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 10px; overflow: hidden;">
+          <div style="background-color: #0A1128; padding: 20px; color: white; text-align: center;"><h2>HomeRatesYard</h2></div>
+          <div style="padding: 30px; color: #334155;">{{content}}</div>
+          <div style="background-color: #f8fafc; padding: 20px; text-align: center; font-size: 12px; color: #94a3b8;">© HomeRatesYard Enterprise</div>
+      </div></body></html>`;
+    
+    fs.writeFileSync(path.join(templateDir, 'base.html'), baseHtml);
+    fs.writeFileSync(path.join(templateDir, 'welcome.html'), '<h2>Welcome {{user_name}}!</h2><p>Click <a href="{{action_url}}">here</a> to login.</p>');
+    fs.writeFileSync(path.join(templateDir, 'password_reset.html'), '<h2>Password Reset</h2><p>Click <a href="{{action_url}}">here</a> to securely reset your password.</p>');
+  }
+} catch (fsError) {
+  console.warn('⚠️ [File System] Cloud read-only file system detected. Skipping local directory creation.');
 }
+
 
 const startServer = async () => {
   try {
@@ -60,12 +66,13 @@ const startServer = async () => {
     await db.sequelize.authenticate();
     console.log('✅ [Database] Connection verified.');
     
-    // 🟢 FIX: Smart Database Sync Logic
-    const shouldAlterDB = NODE_ENV === 'development' || process.env.DB_ALTER === 'true';
+    // 🟢 FIX: Strict Production Database Sync
+    // Never auto-alter in production unless explicitly forced by env variable
+    const shouldAlterDB = process.env.DB_ALTER === 'true';
 
     if (shouldAlterDB) {
+      console.warn(`⚠️ [Database] WARNING: Schema forced sync (alter:true) is ACTIVE. Executing...`);
       await db.sequelize.sync({ alter: true });
-      console.log(`✅ [Database] Schema synced with alter:true (Safety Overrides Active).`);
     } else {
       await db.sequelize.sync();
       console.log('✅ [Database] Production schema verified (Strict Mode).');
@@ -83,7 +90,7 @@ const startServer = async () => {
         ];
 
         for (const userData of coreUsers) {
-            // 🟢 FIX: Use unscoped() to bypass the security scope so we can read the existing password hash
+            // Bypass the security scope so we can read the existing password hash
             const existingUser = await db.User.unscoped().findOne({ where: { email: userData.email } });
             
             if (!existingUser) {
@@ -138,9 +145,7 @@ const startServer = async () => {
     // 3. Start Express Server
     const server = app.listen(PORT, () => {
       console.log(`\n🟢 [HY-ENTERPRISE] HTTP Service active on port ${PORT}`);
-      if (NODE_ENV !== 'development') {
-        console.log(`   - Internal Routing: Active`);
-      }
+      console.log(`   - Internal Routing: Production Security Active`);
     });
 
     // ==========================================
