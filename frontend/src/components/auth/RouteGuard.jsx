@@ -33,7 +33,6 @@ export default function RouteGuard({ children, allowedRoles = [] }) {
   const [isAcceptingTerms, setIsAcceptingTerms] = useState(false);
   const [hasLocallyAccepted, setHasLocallyAccepted] = useState(false);
 
-  // Serialize array for useEffect dependency array to prevent infinite re-renders
   const rolesKey = allowedRoles.join(',');
 
   useEffect(() => {
@@ -48,60 +47,86 @@ export default function RouteGuard({ children, allowedRoles = [] }) {
     // 🟢 Normalizing role string to prevent case-sensitive backend mismatches
     const normalizedRole = String(user?.role || '').toLowerCase().trim();
 
-    // 🟢 UPDATED: Routing maps point directly to index routes (e.g., /borrower)
     const dashboardMap = {
       'superadmin': '/superadmin', 
-      'super_admin': '/superadmin', // Catch-all for legacy DB entries
+      'super_admin': '/superadmin', 
       'admin': '/admin',
       'lender': '/lender', 
       'borrower': '/borrower'
     };
     
-    // Ultimate safety fallback
+    // Default fallback dashboard
     const targetDashboard = dashboardMap[normalizedRole] || '/borrower';
 
-    // SCENARIO 1: Authenticated user trying to view login/register pages
-    if (isAuthenticated && pathname.startsWith('/auth')) {
-      setAuthorized(false);
-      router.replace(targetDashboard); 
-      return;
+    // ==========================================
+    // 🧠 SMART URL PARSER (Fixes the Login Crash)
+    // ==========================================
+    const returnUrl = router.query.returnUrl;
+    let finalDestination = targetDashboard;
+
+    if (returnUrl && typeof returnUrl === 'string') {
+      // Only honor the returnUrl if it actually belongs to their role's domain.
+      // If an Admin logs in with ?returnUrl=/borrower, this safely ignores it.
+      const isAllowedReturn = 
+        (normalizedRole === 'admin' && returnUrl.startsWith('/admin')) ||
+        (normalizedRole === 'superadmin' && returnUrl.startsWith('/superadmin')) ||
+        (normalizedRole === 'lender' && returnUrl.startsWith('/lender')) ||
+        (normalizedRole === 'borrower' && returnUrl.startsWith('/borrower'));
+
+      if (isAllowedReturn) {
+        finalDestination = returnUrl;
+      }
     }
 
-    // SCENARIO 2: Public marketing/utility paths
-    if (isPublicPath(pathname)) {
-      setAuthorized(true);
-      return;
-    }
-
-    // SCENARIO 3: Awaiting Backend Resolution
+    // SCENARIO 1: Awaiting Backend Resolution
     if (loading) {
       setAuthorized(false);
       return;
     }
 
-    // SCENARIO 4: Unauthenticated Request -> Kick to Auth
+    // SCENARIO 2: Unauthenticated Request -> Kick to Auth
     if (!isAuthenticated) {
+      if (isPublicPath(pathname)) {
+        setAuthorized(true);
+        return;
+      }
       setAuthorized(false);
       router.replace({
         pathname: '/auth/login',
-        query: { returnUrl: router.asPath } // Preserve intended destination
+        query: { returnUrl: router.asPath } 
       });
       return;
     }
 
-    // SCENARIO 5: Authenticated, but insufficient role privileges
-    if (allowedRoles.length > 0 && !allowedRoles.includes(normalizedRole) && !allowedRoles.includes(user?.role)) {
+    // --- AT THIS POINT, USER IS FULLY AUTHENTICATED ---
+
+    // SCENARIO 3: Authenticated user trying to view login/register pages
+    if (pathname.startsWith('/auth')) {
       setAuthorized(false);
-      if (pathname !== targetDashboard) {
-        router.replace(targetDashboard);
+      // Cleanly route them to their actual home, bypassing bad return URLs
+      router.replace(finalDestination); 
+      return;
+    }
+
+    // SCENARIO 4: Authenticated, but insufficient role privileges
+    if (allowedRoles.length > 0 && !allowedRoles.includes(normalizedRole)) {
+      setAuthorized(false);
+      if (pathname !== finalDestination) {
+        router.replace(finalDestination);
       }
       return;
     }
 
-    // ✅ Passed all checks
+    // SCENARIO 5: Public marketing/utility paths
+    if (isPublicPath(pathname)) {
+      setAuthorized(true);
+      return;
+    }
+
+    // ✅ Passed all security checks
     setAuthorized(true);
 
-  }, [router.isReady, router.pathname, router.asPath, isAuthenticated, loading, user, rolesKey, mounted]);
+  }, [router.isReady, router.pathname, router.asPath, router.query, isAuthenticated, loading, user, rolesKey, mounted]);
 
   // ==========================================
   // 📜 COMPLIANCE ACTION LOGIC
@@ -128,7 +153,6 @@ export default function RouteGuard({ children, allowedRoles = [] }) {
     return <>{children}</>;
   }
 
-  // Prevent SSR Hydration Mismatches
   if (!mounted) return <div className="min-h-screen bg-slate-50/50" />;
 
   // Loading Overlay
